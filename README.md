@@ -1,11 +1,11 @@
 # 🏸 Haneka — Full-Stack Sports Court Booking System
 
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-haneka.vercel.app-black?style=for-the-badge&logo=vercel)](https://haneka.vercel.app)
-[![CI Pipeline](https://img.shields.io/badge/CI-GitHub%20Actions-blue?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/Spidey173/CourtBook-Pro/actions)
+[![CI Pipeline](https://img.shields.io/badge/CI-GitHub%20Actions-blue?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/Spidey173/Haneka/actions)
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Flask](https://img.shields.io/badge/Flask-3.x-000000?style=for-the-badge&logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Neon%20Serverless-336791?style=for-the-badge&logo=postgresql&logoColor=white)](https://neon.tech)
-[![Tests](https://img.shields.io/badge/Tests-43%20Passed-success?style=for-the-badge&logo=pytest)](https://github.com/Spidey173/CourtBook-Pro)
+[![Tests](https://img.shields.io/badge/Tests-43%20Passed-success?style=for-the-badge&logo=pytest)](https://github.com/Spidey173/Haneka)
 
 A full-stack court booking and resource management system built with **Python**, **Flask**, **SQLAlchemy**, and **PostgreSQL**. Engineered with rigorous **pessimistic database-level row locking (`SELECT ... FOR UPDATE`) and atomic slot allocations** to prevent race conditions and double-bookings under concurrent traffic, alongside **strict UTC timestamp normalization across timezone boundaries**, a **production-parity Docker PostgreSQL development environment**, and a **modern reactive client architecture with optimistic UI updates, state rollback, and TypeScript type safety**.
 
@@ -151,7 +151,7 @@ graph TD
 ## 📂 Project Structure
 
 ```
-CourtBook-Pro/
+Haneka/
 ├── app/
 │   ├── __init__.py            # Application factory (create_app)
 │   ├── config.py              # Environment configuration (Dev, Test, Prod)
@@ -198,8 +198,8 @@ CourtBook-Pro/
 ### 2. Setup Virtual Environment
 ```bash
 # Clone the repository
-git clone https://github.com/Spidey173/CourtBook-Pro.git
-cd CourtBook-Pro
+git clone https://github.com/Spidey173/Haneka.git
+cd Haneka
 
 # Create and activate a virtual environment
 python3 -m venv .venv

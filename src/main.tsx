@@ -55,7 +55,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
           >
             <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>⚠️</div>
             <h2 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: 8, color: '#f97316' }}>
-              CourtBook Pro Rendering Notice
+              Haneka Rendering Notice
             </h2>
             <p style={{ color: '#a1a1aa', fontSize: '0.9rem', marginBottom: 20 }}>
               {this.state.error?.message || 'A client component encountered an issue.'}

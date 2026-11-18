@@ -1,8 +1,8 @@
 {
-  "name": "courtbook-pro",
+  "name": "haneka",
   "version": "1.0.0",
   "private": true,
-  "description": "Enterprise Championship Sports Court Booking Platform",
+  "description": "Haneka — Championship Sports Court Booking Platform",
   "type": "module",
   "scripts": {
     "dev": "vite",

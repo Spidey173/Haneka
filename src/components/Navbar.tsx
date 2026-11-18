@@ -69,8 +69,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Trophy size={22} />
           </div>
           <div>
-            <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: '1.15rem', letterSpacing: '-0.02em', color: '#ffffff' }}>
-              COURTBOOK <span style={{ color: 'var(--orange-primary)' }}>PRO</span>
+            <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: '1.25rem', letterSpacing: '-0.02em', color: '#ffffff' }}>
+              HANE<span style={{ color: 'var(--orange-primary)' }}>KA</span>
             </div>
             <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
               Championship Arena System

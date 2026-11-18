@@ -161,7 +161,7 @@ export const App: React.FC = () => {
             </div>
             <div>
               <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#ffffff' }}>
-                CourtBook Pro
+                Haneka
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
                 Decoupled React 19 + TypeScript frontend with Neon PostgreSQL concurrency engine
@@ -181,7 +181,7 @@ export const App: React.FC = () => {
           </div>
 
           <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-            © {new Date().getFullYear()} CourtBook Pro. All rights reserved.
+            © {new Date().getFullYear()} Haneka. All rights reserved.
           </div>
         </div>
       </footer>

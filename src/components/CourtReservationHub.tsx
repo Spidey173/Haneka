@@ -327,7 +327,7 @@ export const CourtReservationHub: React.FC<CourtReservationHubProps> = ({
           </div>
           <div>
             <div style={{ fontWeight: 700, fontSize: '0.98rem', color: '#ffffff' }}>
-              Championship Badminton Arena — Live Slot Engine
+              Haneka Championship Arena — Live Slot Engine
             </div>
             <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
               Atomic PostgreSQL Row-Level Locking (SELECT ... FOR UPDATE) • High Concurrency Protection

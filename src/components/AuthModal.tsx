@@ -34,7 +34,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen = true, onClose, on
         onClose();
       } else {
         const user = await api.signup(username, email, password);
-        showToast('success', 'Account Created!', `Welcome to CourtBook Pro, ${user.username}`);
+        showToast('success', 'Account Created!', `Welcome to Haneka, ${user.username}`);
         onSuccess(user);
         onClose();
       }

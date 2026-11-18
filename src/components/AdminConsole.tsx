@@ -248,7 +248,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ showToast }) => {
             </span>
           </div>
           <h1 style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '-0.03em', margin: 0 }}>
-            CourtBook Pro Admin Console
+            Haneka Operations Command
           </h1>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: '4px 0 0' }}>
             Full control over court availability, coach rosters, equipment stock, dynamic pricing algorithms, and real-time ledger.
@@ -444,7 +444,7 @@ export const AdminConsole: React.FC<AdminConsoleProps> = ({ showToast }) => {
               Real-Time Concurrency & Row-Locking Status
             </h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: 16 }}>
-              CourtBook Pro runs exclusively on PostgreSQL with explicit <code>SELECT ... FOR UPDATE</code> row-level pessimistic locking and UTC timestamp offsets. Zero double-booking vulnerability under heavy simultaneous loads.
+              Haneka runs exclusively on PostgreSQL with explicit <code>SELECT ... FOR UPDATE</code> row-level pessimistic locking and UTC timestamp offsets. Zero double-booking vulnerability under heavy simultaneous loads.
             </p>
             <div
               style={{

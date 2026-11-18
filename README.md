@@ -1,6 +1,6 @@
-# 🏸 CourtBook Pro — Full-Stack Sports Court Booking System
+# 🏸 Haneka — Full-Stack Sports Court Booking System
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-courtbookpro.vercel.app-black?style=for-the-badge&logo=vercel)](https://courtbookpro.vercel.app)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-haneka.vercel.app-black?style=for-the-badge&logo=vercel)](https://haneka.vercel.app)
 [![CI Pipeline](https://img.shields.io/badge/CI-GitHub%20Actions-blue?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/Spidey173/CourtBook-Pro/actions)
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Flask](https://img.shields.io/badge/Flask-3.x-000000?style=for-the-badge&logo=flask&logoColor=white)](https://flask.palletsprojects.com/)
@@ -13,7 +13,7 @@ A full-stack court booking and resource management system built with **Python**,
 
 ## 🌐 Live Demo & Disposable Sandbox Credentials
 
-👉 **Production URL**: **[https://courtbookpro.vercel.app](https://courtbookpro.vercel.app)**
+👉 **Production URL**: **[https://haneka.vercel.app](https://haneka.vercel.app)**
 
 > [!NOTE]
 > **Ephemeral Demo Environment**: The credentials listed below provide access to a restricted, disposable demo sandbox populated with mock data. Production secrets, user records, and cloud infrastructure controls are strictly decoupled and inaccessible from demo roles.
@@ -31,7 +31,7 @@ A full-stack court booking and resource management system built with **Python**,
 
 ## ⚡ Concurrency & Double-Booking Protection
 
-Standard booking systems frequently suffer from race conditions when two users reserve overlapping slots simultaneously (Time-of-Check to Time-of-Use / TOCTOU bugs). CourtBook Pro implements a multi-tier concurrency protection architecture:
+Standard booking systems frequently suffer from race conditions when two users reserve overlapping slots simultaneously (Time-of-Check to Time-of-Use / TOCTOU bugs). Haneka implements a multi-tier concurrency protection architecture:
 
 ```
 [User A: 09:00 - 11:00] \
@@ -61,7 +61,7 @@ Standard booking systems frequently suffer from race conditions when two users r
 
 Local booking dates and times without timezone offsets frequently introduce date-boundary rounding bugs. If a user in a positive offset timezone (e.g. `Asia/Kolkata` at UTC+5:30) or negative offset (e.g. `America/New_York` at UTC-5) books a slot across midnight, server-local calendar day comparisons can cause off-by-one day slot assignments or false past-slot rejections.
 
-CourtBook Pro enforces strict UTC normalization across the entire data layer:
+Haneka enforces strict UTC normalization across the entire data layer:
 
 * **Explicit UTC Ranges (`app/utils/timezone.py`)**:
   - `slot_to_utc_range(booking_date, time_slot, duration, tz_name)` converts local date and time strings directly to unambiguous UTC start and end bounds (`datetime(..., tzinfo=timezone.utc)`).
@@ -79,7 +79,7 @@ CourtBook Pro enforces strict UTC normalization across the entire data layer:
 
 Testing concurrency-sensitive applications against SQLite introduces dangerous dev/prod divergence: **SQLite locks the entire database file for writes**, completely masking PostgreSQL row-level locking race conditions and sequence bugs.
 
-CourtBook Pro eliminates SQLite divergence by enforcing PostgreSQL across all environments:
+Haneka eliminates SQLite divergence by enforcing PostgreSQL across all environments:
 
 * **Production-Parity Local Development (`docker-compose.yml`)**:
   - Local development runs against a native **PostgreSQL 16 Alpine** container (`courtbook-postgres`), guaranteeing identical row-level `FOR UPDATE` semantics and sequence increment behavior.
@@ -92,7 +92,7 @@ CourtBook Pro eliminates SQLite divergence by enforcing PostgreSQL across all en
 
 ## 🎨 Decoupled Next.js-Caliber Frontend Architecture
 
-CourtBook Pro features a modern, component-driven Single-Page Application (SPA) designed to rival enterprise Next.js platforms, cleanly decoupled from the Flask REST backend:
+Haneka features a modern, component-driven Single-Page Application (SPA) designed to rival enterprise Next.js platforms, cleanly decoupled from the Flask REST backend:
 
 *   **Next.js Design System & Micro-Interactions**:
     - **Palette & Tokens**: Deep zinc/slate dark mode palette (`#09090b` to `#18181b`) accented with championship glowing orange (`#f97316`) and emerald status pills.

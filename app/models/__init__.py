@@ -3,7 +3,7 @@ from app.models.user import User
 from app.models.court import Court
 from app.models.equipment import Equipment
 from app.models.coach import Coach
-from app.models.booking import Booking, BookingSlot, BookingEquipment, BookingStatus
+from app.models.booking import Booking, BookingSlot, BookingEquipment, BookingStatus, ProcessedWebhookEvent
 from app.models.pricing_rule import PricingRule
 
 __all__ = [
@@ -15,5 +15,6 @@ __all__ = [
     'BookingSlot',
     'BookingEquipment',
     'BookingStatus',
+    'ProcessedWebhookEvent',
     'PricingRule'
 ]

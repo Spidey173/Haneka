@@ -25,9 +25,16 @@ class AvailabilityService:
     @classmethod
     def get_active_bookings_snapshot(cls, booking_date: date, exclude_booking_id: Optional[int] = None) -> List[Booking]:
         """Fetches all active bookings for a given date in a single optimized query with relationships pre-loaded."""
+        # Clean up expired holds lazily
+        try:
+            from app.services.booking_service import BookingService
+            BookingService.cleanup_stale_holds()
+        except Exception:
+            pass
+
         query = Booking.query.filter(
             Booking.date == booking_date,
-            Booking.status.in_([BookingStatus.PENDING.value, BookingStatus.CONFIRMED.value])
+            Booking.status.in_([BookingStatus.PENDING.value, BookingStatus.CONFIRMED.value, BookingStatus.HOLD.value])
         )
         if exclude_booking_id:
             query = query.filter(Booking.id != exclude_booking_id)

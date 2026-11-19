@@ -6,6 +6,7 @@ import {
   Equipment,
   PriceCalculation,
   User,
+  BookingFlowState,
 } from '../types';
 import { api } from '../services/api';
 import { useToast } from './Toast';
@@ -67,6 +68,8 @@ export const CourtReservationHub: React.FC<CourtReservationHubProps> = ({
   const [priceCalc, setPriceCalc] = useState<PriceCalculation | null>(null);
   const [calculatingPrice, setCalculatingPrice] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [bookingState, setBookingState] = useState<BookingFlowState>('idle');
+  const [pendingSlot, setPendingSlot] = useState<string | null>(null);
 
   // 7-Day Date Strip Generator
   const dateOptions = useMemo(() => {
@@ -219,7 +222,7 @@ export const CourtReservationHub: React.FC<CourtReservationHubProps> = ({
 
   const totalEquipItems = Object.values(equipmentQuantities).reduce((a, b) => a + b, 0);
 
-  // Submit Booking with Row Locking
+  // Submit Booking with Explicit State Machine & Idempotency Key
   const handleReserve = async () => {
     if (!user) {
       triggerAuth();
@@ -230,57 +233,166 @@ export const CourtReservationHub: React.FC<CourtReservationHubProps> = ({
       return;
     }
 
+    if (bookingState === 'pending' || bookingState === 'unknown') {
+      return; // Prevent double submits while in-flight or reconciling
+    }
+
+    const slotToBook = selectedSlot;
+    const courtIdToBook = selectedCourtId;
+    const bookingDate = date;
+
+    // Generate unique client-side idempotency key for safe retries
+    const idempotencyKey =
+      typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `idem-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+    // Transition state machine: idle -> pending
+    // NEVER show "confirmed" optimistically; display explicit "pending/confirming" state
+    setBookingState('pending');
+    setPendingSlot(slotToBook);
     setSubmitting(true);
+
     try {
       await api.createBooking({
-        court_id: selectedCourtId,
-        date,
-        time_slot: selectedSlot,
+        court_id: courtIdToBook,
+        date: bookingDate,
+        time_slot: slotToBook,
         duration,
         coach_id: selectedCoachId,
         equipment_requests: equipmentQuantities,
         equipment: equipmentQuantities,
         client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        idempotency_key: idempotencyKey,
       });
 
-      showToast('success', 'Court Reserved Successfully!', `Booked for ${duration} hour(s) on ${date} at ${selectedSlot}.`);
+      // Transition state machine: pending -> confirmed ONLY AFTER server ACK!
+      setBookingState('confirmed');
+      setPendingSlot(null);
+      showToast('success', 'Court Reserved Successfully!', `Booked for ${duration} hour(s) on ${bookingDate} at ${slotToBook}.`);
       setSelectedSlot(null);
       setEquipmentQuantities({});
       setSelectedCoachId(null);
-      loadBootstrap(date);
+      loadBootstrap(bookingDate);
       onBookingCreated();
     } catch (err: any) {
-      showToast('error', 'Booking Conflict', err.message || 'Could not complete reservation.');
-      loadBootstrap(date);
+      // Differentiate between 4xx server business rejections and mid-flight network drops
+      if (err.status && err.status >= 400 && err.status < 500) {
+        // Explicit server error (e.g. 409 Conflict): transition to failed
+        setBookingState('failed');
+        setPendingSlot(null);
+        showToast('error', 'Booking Conflict', err.message || 'Could not complete reservation.');
+        loadBootstrap(bookingDate);
+      } else {
+        // Network error or timeout: DO NOT blindly roll back!
+        // Transition to unknown (reconciling) and check actual server state
+        setBookingState('unknown');
+        showToast(
+          'warning',
+          'Network Connection Issue',
+          'Request encountered a network glitch. Reconciling reservation status with arena server...'
+        );
+
+        try {
+          const rec = await api.reconcileBooking(idempotencyKey, courtIdToBook, bookingDate, slotToBook);
+          if (rec.confirmed) {
+            // Server actually persisted the reservation
+            setBookingState('confirmed');
+            setPendingSlot(null);
+            showToast('success', 'Reservation Verified!', `Your reservation for ${slotToBook} was safely confirmed on the server.`);
+            setSelectedSlot(null);
+            setEquipmentQuantities({});
+            setSelectedCoachId(null);
+            loadBootstrap(bookingDate);
+            onBookingCreated();
+            return;
+          } else {
+            // Server confirms booking was not persisted
+            setBookingState('failed');
+            setPendingSlot(null);
+            showToast('error', 'Booking Failed', 'Network dropped before reservation could be committed. Slot has been freed.');
+            loadBootstrap(bookingDate);
+          }
+        } catch {
+          setBookingState('failed');
+          setPendingSlot(null);
+          showToast('error', 'Reconciliation Failed', 'Could not reach server. Please check your network and refresh.');
+        }
+      }
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Quick Demo Player Reserve Handler
+  // Quick Demo Player Reserve Handler with State Machine & Reconcile
   const handleQuickDemoReserve = async () => {
     if (!selectedCourtId || !selectedSlot) {
       showToast('warning', 'Please pick a time slot first.');
       return;
     }
+    if (bookingState === 'pending' || bookingState === 'unknown') {
+      return;
+    }
+
     if (onQuickDemoLogin) {
+      const slotToBook = selectedSlot;
+      const courtIdToBook = selectedCourtId;
+      const bookingDate = date;
+
+      const idempotencyKey =
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `idem-demo-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+      setBookingState('pending');
+      setPendingSlot(slotToBook);
       setSubmitting(true);
+
       try {
         await onQuickDemoLogin('player');
         await api.createBooking({
-          court_id: selectedCourtId,
-          date,
-          time_slot: selectedSlot,
+          court_id: courtIdToBook,
+          date: bookingDate,
+          time_slot: slotToBook,
           duration,
           coach_id: selectedCoachId,
           equipment_requests: equipmentQuantities,
           equipment: equipmentQuantities,
           client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          idempotency_key: idempotencyKey,
         });
-        showToast('success', 'Reservation Confirmed via Demo Player!', `Slot locked for ${duration} hr(s) on ${date} at ${selectedSlot}.`);
+
+        setBookingState('confirmed');
+        setPendingSlot(null);
+        showToast('success', 'Reservation Confirmed via Demo Player!', `Slot locked for ${duration} hr(s) on ${bookingDate} at ${slotToBook}.`);
         onBookingCreated();
       } catch (err: any) {
-        showToast('error', 'Booking Error', err.message || 'Failed to complete quick demo booking.');
+        if (err.status && err.status >= 400 && err.status < 500) {
+          setBookingState('failed');
+          setPendingSlot(null);
+          showToast('error', 'Booking Error', err.message || 'Failed to complete quick demo booking.');
+        } else {
+          setBookingState('unknown');
+          showToast('warning', 'Network Notice', 'Network glitch during booking. Verifying with arena server...');
+          try {
+            const rec = await api.reconcileBooking(idempotencyKey, courtIdToBook, bookingDate, slotToBook);
+            if (rec.confirmed) {
+              setBookingState('confirmed');
+              setPendingSlot(null);
+              showToast('success', 'Reservation Verified!', `Your reservation for ${slotToBook} is confirmed.`);
+              onBookingCreated();
+              return;
+            } else {
+              setBookingState('failed');
+              setPendingSlot(null);
+              showToast('error', 'Booking Failed', 'Reservation was not saved. Please try again.');
+            }
+          } catch {
+            setBookingState('failed');
+            setPendingSlot(null);
+            showToast('error', 'Reconciliation Failed', 'Could not verify state. Please retry.');
+          }
+        }
       } finally {
         setSubmitting(false);
       }
@@ -536,12 +648,15 @@ export const CourtReservationHub: React.FC<CourtReservationHubProps> = ({
                 </p>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: '0.76rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 14, fontSize: '0.76rem', flexWrap: 'wrap' }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <span style={{ width: 10, height: 10, borderRadius: 3, background: 'rgba(255,255,255,0.1)' }} /> Available
                 </span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--orange-primary)' }} /> Selected
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: 3, background: '#f59e0b' }} /> Confirming...
                 </span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <span style={{ width: 10, height: 10, borderRadius: 3, background: '#ef4444', opacity: 0.6 }} /> Booked
@@ -559,16 +674,19 @@ export const CourtReservationHub: React.FC<CourtReservationHubProps> = ({
                   const available = isSlotAvailableForDuration(slot);
                   const isSelected = selectedSlot === slot;
                   const isBooked = bookedCourtSlots.has(slot);
+                  const isPending = pendingSlot === slot && (bookingState === 'pending' || bookingState === 'unknown');
+                  const isReconciling = pendingSlot === slot && bookingState === 'unknown';
+                  const isClickable = available && bookingState !== 'pending' && bookingState !== 'unknown';
 
                   return (
                     <div
                       key={slot}
-                      onClick={() => available && setSelectedSlot(slot)}
-                      className={`slot-item ${isSelected ? 'active' : ''} ${!available ? 'slot-disabled' : ''}`}
+                      onClick={() => isClickable && setSelectedSlot(slot)}
+                      className={`slot-item ${isSelected && !isPending ? 'active' : ''} ${!available ? 'slot-disabled' : ''} ${isPending ? 'slot-pending' : ''} ${isReconciling ? 'slot-reconciling' : ''}`}
                     >
                       <span className="slot-time">{slot}</span>
                       <span className="slot-price-tag">
-                        {isBooked ? 'Locked' : `₹${selectedCourt?.base_price || 600}`}
+                        {isPending ? (isReconciling ? 'Checking...' : 'Confirming...') : isBooked ? 'Locked' : `₹${selectedCourt?.base_price || 600}`}
                       </span>
                     </div>
                   );
@@ -586,16 +704,19 @@ export const CourtReservationHub: React.FC<CourtReservationHubProps> = ({
                   const available = isSlotAvailableForDuration(slot);
                   const isSelected = selectedSlot === slot;
                   const isBooked = bookedCourtSlots.has(slot);
+                  const isPending = pendingSlot === slot && (bookingState === 'pending' || bookingState === 'unknown');
+                  const isReconciling = pendingSlot === slot && bookingState === 'unknown';
+                  const isClickable = available && bookingState !== 'pending' && bookingState !== 'unknown';
 
                   return (
                     <div
                       key={slot}
-                      onClick={() => available && setSelectedSlot(slot)}
-                      className={`slot-item ${isSelected ? 'active' : ''} ${!available ? 'slot-disabled' : ''}`}
+                      onClick={() => isClickable && setSelectedSlot(slot)}
+                      className={`slot-item ${isSelected && !isPending ? 'active' : ''} ${!available ? 'slot-disabled' : ''} ${isPending ? 'slot-pending' : ''} ${isReconciling ? 'slot-reconciling' : ''}`}
                     >
                       <span className="slot-time">{slot}</span>
                       <span className="slot-price-tag">
-                        {isBooked ? 'Locked' : `₹${selectedCourt?.base_price || 600}`}
+                        {isPending ? (isReconciling ? 'Checking...' : 'Confirming...') : isBooked ? 'Locked' : `₹${selectedCourt?.base_price || 600}`}
                       </span>
                     </div>
                   );
@@ -616,17 +737,20 @@ export const CourtReservationHub: React.FC<CourtReservationHubProps> = ({
                   const available = isSlotAvailableForDuration(slot);
                   const isSelected = selectedSlot === slot;
                   const isBooked = bookedCourtSlots.has(slot);
+                  const isPending = pendingSlot === slot && (bookingState === 'pending' || bookingState === 'unknown');
+                  const isReconciling = pendingSlot === slot && bookingState === 'unknown';
+                  const isClickable = available && bookingState !== 'pending' && bookingState !== 'unknown';
                   const peakEst = Math.round((selectedCourt?.base_price || 600) * 1.5);
 
                   return (
                     <div
                       key={slot}
-                      onClick={() => available && setSelectedSlot(slot)}
-                      className={`slot-item ${isSelected ? 'active' : ''} ${!available ? 'slot-disabled' : ''}`}
+                      onClick={() => isClickable && setSelectedSlot(slot)}
+                      className={`slot-item ${isSelected && !isPending ? 'active' : ''} ${!available ? 'slot-disabled' : ''} ${isPending ? 'slot-pending' : ''} ${isReconciling ? 'slot-reconciling' : ''}`}
                     >
                       <span className="slot-time">{slot}</span>
                       <span className="slot-price-tag">
-                        {isBooked ? 'Locked' : `₹${peakEst} (Peak)`}
+                        {isPending ? (isReconciling ? 'Checking...' : 'Confirming...') : isBooked ? 'Locked' : `₹${peakEst} (Peak)`}
                       </span>
                     </div>
                   );
@@ -882,11 +1006,15 @@ export const CourtReservationHub: React.FC<CourtReservationHubProps> = ({
             <button
               type="button"
               onClick={handleReserve}
-              disabled={submitting || !selectedSlot || !selectedCourtId}
+              disabled={submitting || bookingState === 'pending' || bookingState === 'unknown' || !selectedSlot || !selectedCourtId}
               className="btn-next btn-next-primary btn-next-lg"
               style={{ width: '100%', height: 48 }}
             >
-              {submitting ? (
+              {bookingState === 'pending' ? (
+                <span>⏳ Confirming Reservation...</span>
+              ) : bookingState === 'unknown' ? (
+                <span>🔄 Reconciling Arena Status...</span>
+              ) : submitting ? (
                 <span>⚡ Row-Locking & Reserving...</span>
               ) : (
                 <>
@@ -900,11 +1028,15 @@ export const CourtReservationHub: React.FC<CourtReservationHubProps> = ({
               <button
                 type="button"
                 onClick={handleQuickDemoReserve}
-                disabled={submitting || !selectedSlot || !selectedCourtId}
+                disabled={submitting || bookingState === 'pending' || bookingState === 'unknown' || !selectedSlot || !selectedCourtId}
                 className="btn-next btn-next-primary btn-next-lg"
                 style={{ width: '100%', height: 48 }}
               >
-                {submitting ? (
+                {bookingState === 'pending' ? (
+                  <span>⏳ Confirming via Demo Player...</span>
+                ) : bookingState === 'unknown' ? (
+                  <span>🔄 Reconciling Status...</span>
+                ) : submitting ? (
                   <span>⚡ Reserving with Demo Player...</span>
                 ) : (
                   <>

@@ -104,3 +104,46 @@ def test_calculate_price_api(auth_client, seed_test_data):
     assert data['success'] is True
     assert 'total_price' in data['data']
     assert 'breakdown' in data['data']
+
+
+def test_create_hold_api(auth_client, seed_test_data):
+    """Verify POST /api/v1/bookings/hold creates a hold with hold status."""
+    tomorrow = (date.today() + timedelta(days=2)).strftime('%Y-%m-%d')
+    court = Court.query.first()
+
+    response = auth_client.post('/api/v1/bookings/hold', json={
+        'court_id': court.id,
+        'date': tomorrow,
+        'time_slot': '12:00',
+        'duration': 1,
+        'idempotency_key': 'hold-test-key-001'
+    })
+    assert response.status_code == 201
+    data = response.get_json()
+    assert data['success'] is True
+    assert data['data']['booking']['status'] == 'hold'
+    assert data['data']['booking']['hold_expires_at'] is not None
+
+
+def test_reconcile_booking_by_idempotency_api(auth_client, seed_test_data):
+    """Verify GET /api/v1/bookings/by-idempotency/<key> reconciles booking."""
+    tomorrow = (date.today() + timedelta(days=2)).strftime('%Y-%m-%d')
+    court = Court.query.first()
+    key = "reconcile-test-key-999"
+
+    # Create booking
+    auth_client.post('/api/v1/bookings', json={
+        'court_id': court.id,
+        'date': tomorrow,
+        'time_slot': '16:00',
+        'duration': 1,
+        'idempotency_key': key
+    })
+
+    # Query by idempotency key
+    response = auth_client.get(f'/api/v1/bookings/by-idempotency/{key}')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data['success'] is True
+    assert data['data']['idempotency_key'] == key
+    assert data['data']['court_id'] == court.id

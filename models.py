@@ -9,6 +9,7 @@ from app.models import (
     BookingSlot,
     BookingEquipment,
     BookingStatus,
+    ProcessedWebhookEvent,
     PricingRule
 )
 
@@ -22,5 +23,6 @@ __all__ = [
     'BookingSlot',
     'BookingEquipment',
     'BookingStatus',
+    'ProcessedWebhookEvent',
     'PricingRule'
 ]

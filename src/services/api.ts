@@ -144,18 +144,63 @@ export const api = {
     equipment_requests?: Record<number, number>;
     equipment?: Record<number, number>;
     client_timezone?: string;
+    idempotency_key?: string;
   }): Promise<any> {
     const eq = payload.equipment || payload.equipment_requests || {};
     const tz = payload.client_timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const headers: Record<string, string> = {};
+    if (payload.idempotency_key) {
+      headers['Idempotency-Key'] = payload.idempotency_key;
+    }
     return request('/api/v1/bookings', {
       method: 'POST',
+      headers,
       body: JSON.stringify({
         ...payload,
         equipment: eq,
         equipment_requests: eq,
         client_timezone: tz,
+        idempotency_key: payload.idempotency_key,
       }),
     });
+  },
+
+  async getBookingByIdempotency(key: string): Promise<any> {
+    return request(`/api/v1/bookings/by-idempotency/${encodeURIComponent(key)}`);
+  },
+
+  async reconcileBooking(
+    idempotencyKey: string,
+    courtId: number,
+    dateStr: string,
+    slot: string
+  ): Promise<{ confirmed: boolean; booking?: any }> {
+    try {
+      const byKey: any = await this.getBookingByIdempotency(idempotencyKey);
+      if (byKey && byKey.data) {
+        return { confirmed: true, booking: byKey.data };
+      }
+    } catch {
+      // Key lookup fallback
+    }
+
+    try {
+      const userBookings = await this.getUserBookings();
+      const match = userBookings.find(
+        (b) =>
+          b.court_id === courtId &&
+          b.date === dateStr &&
+          (b.time_slot === slot || b.timeSlot === slot) &&
+          b.status !== 'cancelled'
+      );
+      if (match) {
+        return { confirmed: true, booking: match };
+      }
+    } catch {
+      // Offline fallback
+    }
+
+    return { confirmed: false };
   },
 
   async getUserBookings(): Promise<Booking[]> {

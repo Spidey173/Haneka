@@ -10,6 +10,8 @@ class BookingStatus(str, Enum):
     CONFIRMED = 'confirmed'
     CANCELLED = 'cancelled'
     COMPLETED = 'completed'
+    HOLD = 'hold'
+    EXPIRED = 'expired'
 
 
 class Booking(db.Model):
@@ -30,6 +32,8 @@ class Booking(db.Model):
     start_time_utc = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
     end_time_utc = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
     timezone = db.Column(db.String(50), default='UTC', nullable=False)
+    hold_expires_at = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
+    idempotency_key = db.Column(db.String(255), unique=True, nullable=True, index=True)
 
     # Relationships optimized with eager fetching to eliminate N+1 query loops
     user = db.relationship('User', back_populates='bookings', lazy='selectin')
@@ -42,6 +46,8 @@ class Booking(db.Model):
         db.Index('idx_bookings_user_date', 'user_id', 'date'),
         db.Index('idx_bookings_court_date_status', 'court_id', 'date', 'status'),
         db.Index('idx_bookings_date_slot', 'date', 'time_slot'),
+        db.Index('idx_bookings_hold_expiry', 'status', 'hold_expires_at'),
+        db.Index('idx_bookings_idempotency', 'idempotency_key'),
     )
 
 
@@ -71,6 +77,8 @@ class Booking(db.Model):
             'start_time_utc': self.start_time_utc.isoformat() if self.start_time_utc else None,
             'end_time_utc': self.end_time_utc.isoformat() if self.end_time_utc else None,
             'timezone': self.timezone or 'UTC',
+            'hold_expires_at': self.hold_expires_at.isoformat() if self.hold_expires_at else None,
+            'idempotency_key': self.idempotency_key,
             'equipment': [item.to_dict() for item in self.equipment_items]
         }
 
@@ -99,12 +107,34 @@ class BookingSlot(db.Model):
 
     __table_args__ = (
         db.UniqueConstraint('court_id', 'date', 'time_slot', name='uq_court_date_slot'),
+        db.UniqueConstraint('court_id', 'start_time_utc', name='uq_court_slot_start'),
         db.Index('idx_slots_lookup', 'court_id', 'date', 'time_slot'),
         db.Index('idx_coach_slots', 'coach_id', 'date', 'time_slot'),
     )
 
     def __repr__(self) -> str:
         return f"<BookingSlot Booking:{self.booking_id} Court:{self.court_id} {self.date} {self.time_slot}>"
+
+
+class ProcessedWebhookEvent(db.Model):
+    """Stores processed Stripe webhook event IDs for replay and idempotency protection."""
+    __tablename__ = 'processed_webhook_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    event_type = db.Column(db.String(100), nullable=False)
+    processed_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    def to_dict(self) -> dict:
+        return {
+            'id': self.id,
+            'event_id': self.event_id,
+            'event_type': self.event_type,
+            'processed_at': self.processed_at.isoformat() if self.processed_at else None
+        }
+
+    def __repr__(self) -> str:
+        return f"<ProcessedWebhookEvent {self.event_id} ({self.event_type})>"
 
 
 class BookingEquipment(db.Model):

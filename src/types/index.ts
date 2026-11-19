@@ -64,6 +64,8 @@ export interface BookingEquipment {
   equipment?: Equipment;
 }
 
+export type BookingFlowState = 'idle' | 'pending' | 'confirmed' | 'failed' | 'unknown';
+
 export interface Booking {
   id: number;
   user_id: number;
@@ -75,7 +77,9 @@ export interface Booking {
   duration: number;
   total_price: number;
   totalPrice?: number;
-  status: 'CONFIRMED' | 'CANCELLED' | 'COMPLETED';
+  status: 'confirmed' | 'cancelled' | 'completed' | 'hold' | 'pending' | 'CONFIRMED' | 'CANCELLED' | 'COMPLETED' | string;
+  hold_expires_at?: string | null;
+  idempotency_key?: string | null;
   created_at: string;
   start_time_utc?: string;
   end_time_utc?: string;

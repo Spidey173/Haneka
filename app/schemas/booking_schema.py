@@ -21,6 +21,8 @@ class BookingCreateSchema(BaseModel):
     equipment: Dict[str, int] = Field(default_factory=dict, description="Dictionary of equipment_id -> quantity")
     client_estimated_price: Optional[int] = Field(default=None, description="Optional client estimate for mismatch warning")
     client_timezone: Optional[str] = Field(default=None, description="Client IANA timezone e.g. 'Asia/Kolkata', 'UTC'")
+    idempotency_key: Optional[str] = Field(default=None, description="Client idempotency key for safe retries")
+    status: Optional[str] = Field(default=None, description="Optional booking status ('hold' or 'confirmed')")
 
     @model_validator(mode='before')
     @classmethod
@@ -48,6 +50,9 @@ class BookingCreateSchema(BaseModel):
                 data['client_estimated_price'] = data['totalPrice']
             elif 'client_estimated_price' not in data and 'total_price' in data:
                 data['client_estimated_price'] = data['total_price']
+            # Support idempotency_key
+            if 'idempotency_key' not in data and 'idempotencyKey' in data:
+                data['idempotency_key'] = data['idempotencyKey']
         return data
 
     @field_validator('time_slot')

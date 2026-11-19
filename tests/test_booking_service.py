@@ -216,3 +216,169 @@ def test_row_locking_concurrent_slot_conflict_prevention(seed_test_data, normal_
         )
     assert "already booked" in str(exc_info.value)
 
+
+def test_concurrent_same_slot_exactly_one_succeeds(app, seed_test_data, normal_user):
+    """
+    Concurrency test: N parallel requests for the exact same slot -> exactly 1 succeeds,
+    the rest get 409 Conflict.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    tomorrow = (date.today() + timedelta(days=3)).strftime('%Y-%m-%d')
+    court_id = int(seed_test_data['courts'][0].id)
+    user_id = int(normal_user.id)
+    concurrency_count = 10
+
+    def make_booking_request(i):
+        # Each thread gets its own test client logged in as normal_user
+        with app.app_context():
+            client = app.test_client()
+            with client.session_transaction() as sess:
+                sess['_user_id'] = str(user_id)
+                sess['_fresh'] = True
+            response = client.post('/api/bookings/create', json={
+                'court_id': court_id,
+                'date': tomorrow,
+                'time_slot': '10:00',
+                'duration': 1,
+                'idempotency_key': f'req-concurrent-{i}'
+            })
+            return response.status_code, response.get_json()
+
+    with ThreadPoolExecutor(max_workers=concurrency_count) as executor:
+        results = list(executor.map(make_booking_request, range(concurrency_count)))
+
+    status_codes = [r[0] for r in results]
+    successes = status_codes.count(201)
+    conflicts = status_codes.count(409)
+
+    assert successes == 1, f"Expected exactly 1 booking to succeed, but got {successes}. Codes: {status_codes}"
+    assert conflicts == concurrency_count - 1, f"Expected {concurrency_count - 1} requests to get 409, got {conflicts}"
+
+
+def test_concurrent_different_courts_do_not_block_each_other(app, seed_test_data, normal_user):
+    """
+    Concurrency test: Parallel requests for different courts at the same venue
+    do not block each other and all succeed.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    tomorrow = (date.today() + timedelta(days=4)).strftime('%Y-%m-%d')
+    court_ids = [int(c.id) for c in seed_test_data['courts']]
+    user_id = int(normal_user.id)
+    assert len(court_ids) >= 3
+
+    def book_court(cid):
+        with app.app_context():
+            client = app.test_client()
+            with client.session_transaction() as sess:
+                sess['_user_id'] = str(user_id)
+                sess['_fresh'] = True
+            response = client.post('/api/bookings/create', json={
+                'court_id': cid,
+                'date': tomorrow,
+                'time_slot': '14:00',
+                'duration': 1,
+                'idempotency_key': f'court-{cid}-slot-14'
+            })
+            return response.status_code
+
+    with ThreadPoolExecutor(max_workers=len(court_ids)) as executor:
+        status_codes = list(executor.map(book_court, court_ids))
+
+    assert all(code == 201 for code in status_codes), f"All different courts should succeed. Got: {status_codes}"
+
+
+def test_short_lived_hold_and_lazy_cleanup(seed_test_data, normal_user):
+    """
+    Verify short-lived hold creation, conflict during active hold,
+    and automatic release after hold expires via lazy cleanup.
+    """
+    from datetime import datetime, timezone
+    tomorrow = date.today() + timedelta(days=5)
+    court = Court.query.filter_by(id=1).first()
+
+    # 1. Create a hold with 10-minute expiry
+    hold_result = BookingService.create_hold(
+        user_id=normal_user.id,
+        court_id=court.id,
+        booking_date=tomorrow,
+        time_slot='11:00',
+        duration=1,
+        hold_duration_minutes=10
+    )
+    booking_id = hold_result['booking_id']
+    booking = Booking.query.get(booking_id)
+    assert booking.status == BookingStatus.HOLD.value
+    assert booking.hold_expires_at is not None
+
+    # Slot lock exists
+    slot = BookingSlot.query.filter_by(booking_id=booking_id).first()
+    assert slot is not None
+
+    # 2. Concurrent booking attempt while hold is active fails with 409
+    with pytest.raises(BookingConflictError):
+        BookingService.create_booking(
+            user_id=normal_user.id,
+            court_id=court.id,
+            booking_date=tomorrow,
+            time_slot='11:00',
+            duration=1
+        )
+
+    # 3. Simulate hold expiration by setting hold_expires_at in the past
+    booking.hold_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+    from app.extensions import db
+    db.session.commit()
+
+    # 4. New booking attempt triggers lazy cleanup and acquires the now-free slot
+    new_result = BookingService.create_booking(
+        user_id=normal_user.id,
+        court_id=court.id,
+        booking_date=tomorrow,
+        time_slot='11:00',
+        duration=1
+    )
+    assert new_result['booking_id'] is not None
+    assert new_result['booking_id'] != booking_id
+
+    # Old booking is marked cancelled
+    old_booking = Booking.query.get(booking_id)
+    assert old_booking.status == BookingStatus.CANCELLED.value
+
+
+def test_idempotency_key_replay_protection(seed_test_data, normal_user):
+    """
+    Verify that repeating a booking request with the same idempotency key
+    safely returns the existing booking without double-booking or raising conflicts.
+    """
+    tomorrow = date.today() + timedelta(days=6)
+    court = Court.query.filter_by(id=1).first()
+    key = "idem-test-key-safe-retry-123"
+
+    res1 = BookingService.create_booking(
+        user_id=normal_user.id,
+        court_id=court.id,
+        booking_date=tomorrow,
+        time_slot='09:00',
+        duration=1,
+        idempotency_key=key
+    )
+    b_id1 = res1['booking_id']
+
+    # Retry with identical idempotency key
+    res2 = BookingService.create_booking(
+        user_id=normal_user.id,
+        court_id=court.id,
+        booking_date=tomorrow,
+        time_slot='09:00',
+        duration=1,
+        idempotency_key=key
+    )
+    b_id2 = res2['booking_id']
+
+    assert b_id1 == b_id2
+    assert res1['total_price'] == res2['total_price']
+    # Ensure only 1 booking slot exists
+    slots = BookingSlot.query.filter_by(court_id=court.id, date=tomorrow, time_slot='09:00').all()
+    assert len(slots) == 1
+
+

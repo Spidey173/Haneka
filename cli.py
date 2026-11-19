@@ -129,6 +129,15 @@ def create_admin(username, email, password):
         db.session.commit()
 
 
+@cli.command('cleanup-stale-holds')
+def cleanup_stale_holds_cmd():
+    """Expires stale booking holds and releases their slot locks."""
+    from app.services.booking_service import BookingService
+    with app.app_context():
+        count = BookingService.cleanup_stale_holds()
+        click.secho(f"✅ Cleaned up {count} stale booking holds!", fg='green')
+
+
 @cli.command('reset-db')
 @click.confirmation_option(prompt='Are you sure you want to drop and recreate the database?')
 def reset_db():

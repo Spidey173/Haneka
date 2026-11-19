@@ -43,6 +43,9 @@ class BaseConfig:
     # Venue Timezone (enforces consistent UTC conversions)
     VENUE_TIMEZONE = os.environ.get('VENUE_TIMEZONE', 'Asia/Kolkata')
 
+    # Stripe Webhook Secret
+    STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', 'whsec_test_secret_for_booking_system')
+
     # Flask-Compress settings
     COMPRESS_MIMETYPES = [
         'text/html',
@@ -80,13 +83,19 @@ class DevelopmentConfig(BaseConfig):
 
 
 class TestingConfig(BaseConfig):
-    """Testing configuration supporting PostgreSQL container or in-memory fallback."""
+    """Testing configuration supporting PostgreSQL container or SQLite file fallback."""
     DEBUG = False
     TESTING = True
-    SQLALCHEMY_DATABASE_URI = _normalize_db_url(
-        os.environ.get('TEST_DATABASE_URL') or 'sqlite:///:memory:'
+    _test_db_url = _normalize_db_url(
+        os.environ.get('TEST_DATABASE_URL') or 'sqlite:////tmp/courtbook_test.db'
     )
-    SQLALCHEMY_ENGINE_OPTIONS = {}
+    SQLALCHEMY_DATABASE_URI = _test_db_url
+    if 'sqlite' in _test_db_url:
+        SQLALCHEMY_ENGINE_OPTIONS = {
+            'connect_args': {'check_same_thread': False, 'timeout': 30}
+        }
+    else:
+        SQLALCHEMY_ENGINE_OPTIONS = {}
     WTF_CSRF_ENABLED = False
     RATELIMIT_ENABLED = False
     SECRET_KEY = 'test-secret-key'

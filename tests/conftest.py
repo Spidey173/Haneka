@@ -10,7 +10,7 @@ from app.models import User, Court, Equipment, Coach, PricingRule, Booking, Book
 def _reset_postgres_sequences():
     """Resets PostgreSQL sequence generators to match max(id) across tables."""
     if _db.engine.dialect.name == 'postgresql':
-        for table in ['courts', 'equipment', 'coaches', 'pricing_rules', 'users', 'bookings', 'booking_slots', 'booking_equipment']:
+        for table in ['courts', 'equipment', 'coaches', 'pricing_rules', 'users', 'bookings', 'booking_slots', 'booking_equipment', 'processed_webhook_events']:
             try:
                 _db.session.execute(
                     text(f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), COALESCE((SELECT MAX(id) FROM {table}), 0) + 1, false)")
@@ -25,9 +25,14 @@ def app():
     """Creates a testing instance of the application."""
     app = create_app('testing')
     with app.app_context():
+        if _db.engine.dialect.name == 'sqlite':
+            with _db.engine.connect() as conn:
+                conn.execute(text("PRAGMA journal_mode=WAL;"))
+                conn.execute(text("PRAGMA busy_timeout=30000;"))
+                conn.commit()
         _db.create_all()
         yield app
-        # Only drop tables if using in-memory SQLite to prevent destroying persistent schemas
+        # Only drop tables if using SQLite to clean up test database
         if app.config.get('SQLALCHEMY_DATABASE_URI', '').startswith('sqlite'):
             _db.drop_all()
 

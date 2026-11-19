@@ -1,15 +1,16 @@
 """Unified RESTful API Controller."""
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Dict, Any, Optional, List
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_required, current_user
+from sqlalchemy.exc import IntegrityError
 from app.extensions import db, csrf
 from app.models.user import User
 from app.models.court import Court
 from app.models.equipment import Equipment
 from app.models.coach import Coach
-from app.models.booking import Booking, BookingEquipment, BookingSlot, BookingStatus
+from app.models.booking import Booking, BookingEquipment, BookingSlot, BookingStatus, ProcessedWebhookEvent
 from app.models.pricing_rule import PricingRule
 from app.schemas.booking_schema import (
     BookingCreateSchema,
@@ -27,6 +28,7 @@ from app.services.pricing_service import PricingService
 from app.services.availability_service import AvailabilityService
 from app.services.booking_service import BookingService, BookingConflictError, BookingNotFoundError
 from app.services.analytics_service import AnalyticsService
+from app.services.stripe_service import verify_stripe_signature, StripeSignatureVerificationError
 from app.utils.decorators import admin_required, api_login_required
 from app.utils.responses import success_response, error_response
 
@@ -379,6 +381,14 @@ def create_booking_endpoint():
     except Exception as e:
         return error_response(f"Validation failed: {e}", status_code=422)
 
+    idempotency_key = (
+        request.headers.get('Idempotency-Key')
+        or getattr(validated, 'idempotency_key', None)
+        or data.get('idempotency_key')
+        or data.get('idempotencyKey')
+    )
+    status = getattr(validated, 'status', None) or data.get('status')
+
     try:
         booking_result = BookingService.create_booking(
             user_id=current_user.id,
@@ -388,11 +398,14 @@ def create_booking_endpoint():
             duration=validated.duration,
             coach_id=validated.coach_id,
             equipment_requests=validated.equipment,
-            client_timezone=validated.client_timezone
+            client_timezone=validated.client_timezone,
+            idempotency_key=idempotency_key,
+            status=status
         )
+        msg = "Booking confirmed successfully" if booking_result.get('booking', {}).get('status') == BookingStatus.CONFIRMED.value else "Court hold created successfully"
         return success_response(
             data=booking_result,
-            message="Booking confirmed successfully",
+            message=msg,
             status_code=201,
             booking_id=booking_result['booking_id']  # Top-level key for backwards compatibility
         )
@@ -403,6 +416,155 @@ def create_booking_endpoint():
     except Exception as e:
         logger.exception("Booking creation failed: %s", e)
         return error_response("Internal server error during booking creation", status_code=500)
+
+
+@api_bp.route('/bookings/hold', methods=['POST'])
+@api_bp.route('/v1/bookings/hold', methods=['POST'])
+@api_login_required
+def create_hold_endpoint():
+    """Explicit endpoint to create a short-lived court hold."""
+    data = request.get_json(silent=True) or {}
+    try:
+        validated = BookingCreateSchema(**data)
+    except Exception as e:
+        return error_response(f"Validation failed: {e}", status_code=422)
+
+    idempotency_key = (
+        request.headers.get('Idempotency-Key')
+        or getattr(validated, 'idempotency_key', None)
+        or data.get('idempotency_key')
+        or data.get('idempotencyKey')
+    )
+
+    try:
+        booking_result = BookingService.create_hold(
+            user_id=current_user.id,
+            court_id=validated.court_id,
+            booking_date=validated.date,
+            time_slot=validated.time_slot,
+            duration=validated.duration,
+            coach_id=validated.coach_id,
+            equipment_requests=validated.equipment,
+            client_timezone=validated.client_timezone,
+            idempotency_key=idempotency_key
+        )
+        return success_response(
+            data=booking_result,
+            message="Court hold created successfully",
+            status_code=201,
+            booking_id=booking_result['booking_id']
+        )
+    except BookingConflictError as bce:
+        return error_response(str(bce), status_code=409)
+    except ValueError as ve:
+        return error_response(str(ve), status_code=400)
+    except Exception as e:
+        logger.exception("Hold creation failed: %s", e)
+        return error_response("Internal server error during hold creation", status_code=500)
+
+
+@api_bp.route('/bookings/by-idempotency/<key>', methods=['GET'])
+@api_bp.route('/v1/bookings/by-idempotency/<key>', methods=['GET'])
+@api_login_required
+def get_booking_by_idempotency(key: str):
+    """Reconciles booking status using idempotency key after network interruption."""
+    booking = Booking.query.filter_by(idempotency_key=key, user_id=current_user.id).first()
+    if not booking:
+        return error_response("Booking not found for key", status_code=404)
+    return success_response(data=booking.to_dict())
+
+
+# ==========================================
+# Stripe Webhook Endpoint (Signature Verification & Replay Protection)
+# ==========================================
+
+@api_bp.route('/webhooks/stripe', methods=['POST'])
+@api_bp.route('/v1/webhooks/stripe', methods=['POST'])
+@csrf.exempt
+def stripe_webhook_endpoint():
+    """
+    Handles Stripe webhook events with strict raw-body signature verification,
+    timestamp tolerance, and database-level replay / idempotency protection.
+    """
+    # 1. Read raw request body bytes (NOT parsed JSON)
+    payload = request.get_data()
+    sig_header = request.headers.get('Stripe-Signature')
+
+    secret = current_app.config.get('STRIPE_WEBHOOK_SECRET', 'whsec_test_secret_for_booking_system')
+
+    # 2. Verify signature against raw body
+    try:
+        event = verify_stripe_signature(payload, sig_header, secret)
+    except StripeSignatureVerificationError as e:
+        logger.warning("Stripe signature verification rejected: %s", e)
+        return jsonify({'error': str(e), 'success': False}), 400
+    except Exception as e:
+        logger.warning("Malformed Stripe payload: %s", e)
+        return jsonify({'error': str(e), 'success': False}), 400
+
+    event_id = event.get('id')
+    event_type = event.get('type')
+    if not event_id:
+        return jsonify({'error': 'Missing event ID in Stripe payload', 'success': False}), 400
+
+    # 3. Replay Protection: Check if this event.id has already been processed
+    existing_event = ProcessedWebhookEvent.query.filter_by(event_id=event_id).first()
+    if existing_event:
+        logger.info("Ignoring duplicate Stripe webhook event %s (already processed)", event_id)
+        return jsonify({
+            'status': 'ignored',
+            'message': 'Duplicate event: already processed',
+            'event_id': event_id
+        }), 200
+
+    # 4. Handle event side effects safely (no double-updates)
+    try:
+        if event_type in ['checkout.session.completed', 'payment_intent.succeeded']:
+            event_obj = event.get('data', {}).get('object', {})
+            metadata = event_obj.get('metadata', {}) or {}
+            booking_id = metadata.get('booking_id') or event_obj.get('client_reference_id')
+
+            if booking_id:
+                try:
+                    b_id = int(booking_id)
+                    booking = Booking.query.filter_by(id=b_id).first()
+                    if booking:
+                        if booking.status == BookingStatus.CONFIRMED.value:
+                            logger.info("Booking #%d already confirmed; skipping duplicate update", b_id)
+                        else:
+                            BookingService.confirm_booking(b_id)
+                            logger.info("Successfully confirmed Booking #%d via Stripe event %s", b_id, event_id)
+                except Exception as b_err:
+                    logger.error("Error confirming booking #%s from webhook: %s", booking_id, b_err)
+
+        # 5. Record processed event ID in database with unique constraint
+        processed_record = ProcessedWebhookEvent(
+            event_id=event_id,
+            event_type=event_type,
+            processed_at=datetime.now(timezone.utc)
+        )
+        db.session.add(processed_record)
+        db.session.commit()
+        logger.info("Recorded Stripe event %s (%s)", event_id, event_type)
+
+    except IntegrityError:
+        db.session.rollback()
+        logger.info("Concurrent duplicate delivery for event %s caught by DB constraint", event_id)
+        return jsonify({
+            'status': 'ignored',
+            'message': 'Duplicate event caught by database constraint',
+            'event_id': event_id
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.exception("Error processing Stripe webhook: %s", e)
+        return jsonify({'error': 'Webhook processing failure', 'success': False}), 500
+
+    return jsonify({
+        'status': 'success',
+        'received': True,
+        'event_id': event_id
+    }), 200
 
 
 @api_bp.route('/bookings/<int:booking_id>/cancel', methods=['POST'])
